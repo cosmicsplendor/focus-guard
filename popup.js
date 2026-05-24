@@ -83,10 +83,10 @@ function render() {
   list.querySelectorAll(".site-toggle").forEach(cb => {
     cb.addEventListener("change", async e => {
       const idx = parseInt(e.target.dataset.index);
-      const turningOff = sites[idx].enabled; // was on, now turning off — no friction needed
+      const currentlyBlocked = sites[idx].enabled; // was on, now turning off — no friction needed
 
-      if (turningOff) {
-        // Re-enable blocking — no friction, instant
+      if (!currentlyBlocked) {
+        // blocking — no friction, instant
         sites[idx].enabled = false;
         confirmingIndex = null;
         await save();

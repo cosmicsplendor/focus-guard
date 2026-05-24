@@ -1,5 +1,6 @@
 let sites = [];
 let globalEnabled = true;
+let confirmingIndex = null; // which site is awaiting name confirmation
 
 async function load() {
   const data = await chrome.storage.sync.get(["sites", "globalEnabled"]);
@@ -36,48 +37,133 @@ function render() {
 
   list.innerHTML = "";
   sites.forEach((site, i) => {
+    const isConfirming = confirmingIndex === i;
+    const isBlocked = site.enabled && !isConfirming;
     const row = document.createElement("div");
     row.className = "site-row" + ((!site.enabled || !globalEnabled) ? " disabled" : "");
 
     const isYoutube = site.domain.includes("youtube");
-    const tag = isYoutube
-      ? `<span class="youtube-tag">⚠ partial</span>`
-      : "";
+    const tag = isYoutube ? `<span class="youtube-tag">⚠ partial</span>` : "";
 
-    row.innerHTML = `
-      <label class="toggle">
-        <input type="checkbox" ${site.enabled ? "checked" : ""} data-index="${i}" class="site-toggle" />
-        <span class="toggle-track"></span>
-      </label>
-      <span class="site-domain">${site.domain}</span>
-      ${tag}
-      <button class="delete-btn" data-index="${i}" title="Remove">✕</button>
-    `;
+    if (isConfirming) {
+      // Inline confirmation UI — replace the row contents
+      row.className = "site-row confirming";
+      row.innerHTML = `
+        <div class="confirm-block">
+          <div class="confirm-prompt">type <strong>${site.domain}</strong> to unblock</div>
+          <div class="confirm-input-row">
+            <input
+              type="text"
+              class="confirm-input"
+              id="confirmInput_${i}"
+              placeholder="${site.domain}"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="cancel-btn" data-index="${i}">✕</button>
+          </div>
+        </div>
+      `;
+    } else {
+      row.innerHTML = `
+        <label class="toggle">
+          <input type="checkbox" ${site.enabled ? "checked" : ""} data-index="${i}" class="site-toggle" />
+          <span class="toggle-track"></span>
+        </label>
+        <span class="site-domain">${site.domain}</span>
+        ${tag}
+        <button class="delete-btn" data-index="${i}" title="Remove">✕</button>
+      `;
+    }
 
     list.appendChild(row);
   });
 
-  // Bind toggles
+  // Bind regular toggles
   list.querySelectorAll(".site-toggle").forEach(cb => {
     cb.addEventListener("change", async e => {
       const idx = parseInt(e.target.dataset.index);
-      sites[idx].enabled = e.target.checked;
-      await save();
+      const turningOff = sites[idx].enabled; // was on, now turning off — no friction needed
+
+      if (turningOff) {
+        // Re-enable blocking — no friction, instant
+        sites[idx].enabled = false;
+        confirmingIndex = null;
+        await save();
+        render();
+      } else {
+        // Trying to unblock — require confirmation
+        e.target.checked = false; // revert visual
+        confirmingIndex = idx;
+        render();
+        // Focus the input after render
+        const inp = document.getElementById(`confirmInput_${idx}`);
+        if (inp) inp.focus();
+      }
+    });
+  });
+
+  // Bind confirm inputs
+  list.querySelectorAll(".confirm-input").forEach(inp => {
+    const idx = parseInt(inp.id.replace("confirmInput_", ""));
+
+    inp.addEventListener("input", e => {
+      const typed = e.target.value.trim().toLowerCase();
+      const expected = sites[idx].domain.toLowerCase();
+      if (typed === expected) {
+        inp.classList.add("match");
+      } else {
+        inp.classList.remove("match");
+      }
+    });
+
+    inp.addEventListener("keydown", async e => {
+      if (e.key === "Enter") {
+        const typed = inp.value.trim().toLowerCase();
+        const expected = sites[idx].domain.toLowerCase();
+        if (typed === expected) {
+          sites[idx].enabled = true;
+          confirmingIndex = null;
+          await save();
+          render();
+        } else {
+          inp.classList.add("shake");
+          setTimeout(() => inp.classList.remove("shake"), 400);
+        }
+      }
+      if (e.key === "Escape") {
+        confirmingIndex = null;
+        render();
+      }
+    });
+  });
+
+  // Cancel buttons (inside confirm row)
+  list.querySelectorAll(".cancel-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      confirmingIndex = null;
       render();
     });
   });
 
-  // Bind delete buttons
+  // Delete buttons (normal rows)
   list.querySelectorAll(".delete-btn").forEach(btn => {
     btn.addEventListener("click", async e => {
       const idx = parseInt(e.target.dataset.index);
       sites.splice(idx, 1);
+      confirmingIndex = null;
       await save();
       render();
     });
   });
 
   updateCounts();
+
+  // Focus confirm input if one is open
+  if (confirmingIndex !== null) {
+    const inp = document.getElementById(`confirmInput_${confirmingIndex}`);
+    if (inp) inp.focus();
+  }
 }
 
 function updateCounts() {
@@ -89,15 +175,13 @@ function updateCounts() {
 }
 
 function cleanDomain(raw) {
-  return raw
-    .trim()
-    .toLowerCase()
+  return raw.trim().toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/^www\./, "")
     .replace(/\/.*$/, "");
 }
 
-// Master toggle
+// Master toggle — also require typing to re-enable if pausing
 document.getElementById("masterToggle").addEventListener("change", async e => {
   globalEnabled = e.target.checked;
   await save();
@@ -127,7 +211,6 @@ async function addSite() {
   await save();
   render();
 
-  // Scroll to bottom
   const list = document.getElementById("siteList");
   list.scrollTop = list.scrollHeight;
 }

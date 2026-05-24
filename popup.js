@@ -83,22 +83,21 @@ function render() {
   list.querySelectorAll(".site-toggle").forEach(cb => {
     cb.addEventListener("change", async e => {
       const idx = parseInt(e.target.dataset.index);
-      const currentlyBlocked = sites[idx].enabled; // was on, now turning off — no friction needed
+      const currentlyBlocked = sites[idx].enabled;
 
-      if (!currentlyBlocked) {
-        // blocking — no friction, instant
-        sites[idx].enabled = false;
+      if (currentlyBlocked) {
+        // unblocking → friction
+        e.target.checked = true;   // was: false (wrong — keeps it looking unblocked)
+        confirmingIndex = idx;
+        render();
+        const inp = document.getElementById(`confirmInput_${idx}`);
+        if (inp) inp.focus();
+      } else {
+        // blocking → instant
+        sites[idx].enabled = true;  // was: false (wrong — was unblocking it)
         confirmingIndex = null;
         await save();
         render();
-      } else {
-        // Trying to unblock — require confirmation
-        e.target.checked = false; // revert visual
-        confirmingIndex = idx;
-        render();
-        // Focus the input after render
-        const inp = document.getElementById(`confirmInput_${idx}`);
-        if (inp) inp.focus();
       }
     });
   });
@@ -122,7 +121,7 @@ function render() {
         const typed = inp.value.trim().toLowerCase();
         const expected = sites[idx].domain.toLowerCase();
         if (typed === expected) {
-          sites[idx].enabled = true;
+          sites[idx].enabled = false;
           confirmingIndex = null;
           await save();
           render();
